@@ -1,0 +1,174 @@
+# Project1-StockMarket
+
+networks:
+  dataplane:
+
+volumes:
+  pgdata:
+  kafkadata:
+  zookeeperdata:
+
+services:                   
+  # --- ZooKeeper (required for Kafka 3.2.x) -
+  zookeeper:                 # ← service key under "services"
+    image: bitnami/zookeeper:3.8
+    networks: [dataplane]
+    environment:
+      ZOO_PORT_NUMBER: 2181
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+      ZOO_4LW_COMMANDS_WHITELIST: "ruok,stat,srvr,conf,mntr"
+    ports: ["2181:2181"]
+    volumes:
+      - zookeeperdata:/bitnami/zookeeper
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc -w 2 127.0.0.1 2181 | grep -q imok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # --- Kafka (use Confluent 7.7.x → Kafka 3.7, still ZK)---
+  kafka:
+    image: confluentinc/cp-kafka:7.7.1
+    networks: [dataplane]
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_NUM_PARTITIONS: "3"
+    ports: ["9092:9092","29092:29092"]
+    healthcheck:
+      test: ["CMD-SHELL","kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+
+  # --- Kafka UI (helper) ---
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    networks: [dataplane]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+       - "8088:8080"   
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+
+  # --- Postgres ---
+  postgres:
+    image: postgres:17
+    networks: [dataplane]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-eventsdb}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5435:5432"   # host_port : container_port
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-eventsdb} -h localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # --- pgAdmin (helper) ---
+  pgadmin:
+    image: dpage/pgadmin4:2025-06-27-2
+    networks: [dataplane]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports: ["5050:80"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/misc/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # --- API (producer → Kafka) ---
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    networks: [dataplane]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-events}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # --- Spark (consumer → Postgres) ---
+  spark:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    networks: [dataplane]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      SPARK_MODE: client
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-events}
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-eventsdb}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      SPARK_STREAMING_TRIGGER: 5s
+    volumes:
+      - ./spark/job.py:/app/job.py:ro
+    command:
+      - bash
+      - -lc
+      - >
+        /opt/bitnami/spark/bin/spark-submit
+        --master local[*]
+        --packages
+        org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.3,org.apache.kafka:kafka-clients:3.7.0
+        /app/job.py
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'spark-submit.*job.py' >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+

@@ -1,0 +1,57 @@
+create spark pool
+create notebook (
+
+
+https://cscuk.fcdo.gov.uk/scholarships/commonwealth-phd-scholarships-for-least-developed-countries-and-vulnerable-states/
+
+https://www.imperial.ac.uk/study/fees-and-funding/postgraduate-doctoral/grants-scholarships/presidents-phd/#eligibility
+
+
+docker-compose build api  
+docker-compose up api
+
+
+https://github.com/Saheed388/real-time-bigdata-project/
+
+https://www.kdnuggets.com/creating-a-data-science-pipeline-for-real-time-analytics-using-apache-kafka-and-spark
+
+https://pandeyshikha075.medium.com/getting-started-with-confluent-kafka-in-python-579b708801e7
+
+4546384918413668
+04/29
+
+kafka cluster id ([guid]::NewGuid().ToString("N")): 67c18a9346c14661b54da471411fba00
+
+
+
+  spark-worker:
+    image: spark:3.5.1-python3
+    container_name: spark-worker
+    hostname: spark-worker
+    networks: [stock_market]
+    depends_on:
+      spark-master:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    command: ["/opt/spark/bin/spark-class",
+              "org.apache.spark.deploy.worker.Worker",
+              "spark://spark-master:7077",
+              "--webui-port","8081"]
+    healthcheck:
+      test: ["CMD-SHELL", "</dev/tcp/127.0.0.1/8081 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+
+docker compose build consumer
+docker compose up consumer
+
+
+ #.option("subscribe", topic) \
