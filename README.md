@@ -1,6 +1,6 @@
 # Project1-StockMarket
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 Project1-StockMarket/
@@ -39,7 +39,6 @@ Project1-StockMarket/
 > ```bash
 > chmod +x scripts/*.sh
 > ```
-
 
 ## Project Tech Stack and Flow
 
@@ -239,7 +238,7 @@ events
 
 ---
 
-## 📊 Power BI
+## Power BI
 
 Connect Power BI to PostgreSQL using:
 
