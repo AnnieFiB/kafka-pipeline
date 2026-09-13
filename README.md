@@ -1,97 +1,264 @@
-# Project1-StockMarket 
+# Project1-StockMarket
 
-## Repo Structure
+## 📁 Project Structure
 
+```text
 Project1-StockMarket/
-├─ docker-compose.yml          # Orchestrates API, Kafka, Spark, Postgres, pgAdmin, Kafka UI
-├─ .env                        # versions, passwords, ports
 │
-├─ kafka/                      # custom Kafka build
-│  ├─ Dockerfile
-│  ├─ prebuildfs/
-│  └─ rootfs/
+├── docker-compose.yml        # Orchestrates all services
+├── .env                      # Environment variables, versions, passwords, and ports
 │
-├─ api/                        # API service (publishes to Kafka)
-│  ├─ Dockerfile
-│  ├─ app.py                   # Example FastAPI producer
-│  ├─ requirements.txt
+├── kafka/                    # Kafka configuration and custom image
+│   ├── Dockerfile
+│   ├── prebuildfs/
+│   └── rootfs/
 │
-├─ spark/                      # Spark jobs consuming Kafka and writing to Postgres
-│  ├─ job.py                   # Structured Streaming job (Kafka → Postgres)
+├── api/                      # FastAPI service that publishes events to Kafka
+│   ├── Dockerfile
+│   ├── app.py
+│   └── requirements.txt
 │
-├─ postgres/
-│  ├─ init.sql                 # Initializes DB (events table etc.)
+├── spark/                    # Spark streaming processing
+│   └── job.py                # Kafka → Spark → PostgreSQL pipeline
 │
-├─ scripts/ (chmod +x scripts/*.sh)
-│  ├─ send_test_event.sh       # quick curl to API
-│  └─ wait-for-url.sh          # tiny helper used by healthchecks
+├── postgres/
+│   └── init.sql              # Database and table initialization
 │
-├─ notebooks/                  # For ad-hoc exploration
-│  └─ exploration.ipynb
+├── scripts/                  # Utility and testing scripts
+│   ├── send_test_event.sh
+│   └── wait-for-url.sh
 │
-└─ README.md                   # Setup + run instructions
+├── notebooks/                # Data exploration and analysis
+│   └── exploration.ipynb
+│
+└── README.md                 # Project documentation
+```
+
+> **Note:** Make shell scripts executable before running:
+>
+> ```bash
+> chmod +x scripts/*.sh
+> ```
+
 
 ## Project Tech Stack and Flow
 
-- Kafka UI → inspect topics/messages.
-- API → produces JSON events into Kafka.
-- Spark → consumes from Kafka, writes to Postgres.
-- Postgres → stores results for analytics.
-- pgAdmin → manage Postgres visually.
-- Power BI → external (connects to Postgres at localhost:5432).
+The pipeline processes stock market events through the following services:
 
-## Run Container
+```text
+API
+ ↓
+Kafka
+ ↓
+Spark
+ ↓
+PostgreSQL
+ ↓
+Power BI
+```
 
+- **API** → Produces JSON events to Kafka.
+- **Kafka** → Handles real-time event streaming.
+- **Kafka UI** → Monitors Kafka topics and messages.
+- **Spark** → Consumes Kafka events and processes streaming data.
+- **PostgreSQL** → Stores processed data for analytics.
+- **pgAdmin** → Provides a graphical interface for PostgreSQL.
+- **Power BI** → Connects to PostgreSQL for reporting and visualization.
+
+---
+
+## Run the Containers
+
+Stop existing containers:
+
+```bash
 docker compose down
+```
+
+Build the services:
+
+```bash
 docker compose build
-docker compose up -d -- start up container
+```
 
--- health check
-    curl -fsS http://localhost:8088/actuator/health && echo " (Kafka UI OK)"
-    curl -fsS http://localhost:8000/health && echo " (API OK)"
+Start the containers:
 
--- send data:
-    ./scripts/send_test_event.sh
--- Send a test event and verify rows land in Postgres:
-    curl -X POST http://localhost:8000/event \
-    -H "content-type: application/json" \
-    -d '{"source":"api","value":123,"category":"spark"}'
+```bash
+docker compose up -d
+```
 
-## Output
+Check container status:
 
-- Kafka UI → http://localhost:8088  (topic events appears after first message)
-- API → http://localhost:8000/health
-- Postgres → localhost:5433 (db eventsdb; table public.events_stream)
-- pgAdmin → http://localhost:5050  (add server host postgres, user/pass app/app). add a server with:
-        Host: postgres | DB: eventsdb | User/Pass: app / app
-- Spark driver UI shows at http://localhost:4040  while the job is running
+```bash
+docker compose ps
+```
 
-## check opened ports
-    docker compose ps
-    docker compose port postgres 5433
-        netstat -ano | findstr :5433
+---
 
-## Tail logs
-    docker compose logs -f api
-    docker compose logs -f kafka
-    docker compose logs -f spark
+## Health Checks
 
-## Restart a single service after edits
-    docker compose up -d --build api
-    docker compose restart spark
+Check Kafka UI:
 
-## Validate compose file: docker compose config
+```bash
+curl -fsS http://localhost:8088/actuator/health && echo " (Kafka UI OK)"
+```
 
-## Confirm Spark has the Kafka & Postgres jars: docker compose exec spark bash -lc 'ls /opt/bitnami/spark/jars | egrep "kafka|postgresql"'
+Check API:
 
-## API says queued but no Kafka messages: Check KAFKA_BOOTSTRAP is kafka:9092 inside the API container and that topic is events
+```bash
+curl -fsS http://localhost:8000/health && echo " (API OK)"
+```
 
+---
 
-## Power BI
-    Connect to PostgreSQL:
-        Server: localhost
-        Database: eventsdb
-        Credentials: user app, password app
-        Optional SQL:
-            SELECT source, category, value, to_timestamp(ingested_at) AS ingested_at_ts, processed_ts
-                    FROM public.events_stream;
+## Send Test Data
+
+Using the test script:
+
+```bash
+./scripts/send_test_event.sh
+```
+
+Or send an event directly to the API:
+
+```bash
+curl -X POST http://localhost:8000/event \
+  -H "content-type: application/json" \
+  -d '{"source":"api","value":123,"category":"spark"}'
+```
+
+The event should flow through:
+
+```text
+API → Kafka → Spark → PostgreSQL
+```
+
+---
+
+## Service Access
+
+| Service    | Address                          | Details                                         |
+| ---------- | -------------------------------- | ----------------------------------------------- |
+| Kafka UI   | `http://localhost:8088`        | Topic`events` appears after the first message |
+| API        | `http://localhost:8000/health` | API health endpoint                             |
+| PostgreSQL | `localhost:5433`               | Database:`eventsdb`                           |
+| pgAdmin    | `http://localhost:5050`        | PostgreSQL administration                       |
+| Spark UI   | `http://localhost:4040`        | Available while Spark job is running            |
+
+### pgAdmin Connection
+
+Add a new server using:
+
+```text
+Host:     postgres
+Database: eventsdb
+Username: app
+Password: app
+```
+
+The streaming data is stored in:
+
+```text
+public.events_stream
+```
+
+---
+
+## Check Open Ports
+
+```bash
+docker compose ps
+```
+
+Check the PostgreSQL port mapping:
+
+```bash
+docker compose port postgres 5432
+```
+
+---
+
+## View Container Logs
+
+```bash
+docker compose logs -f api
+docker compose logs -f kafka
+docker compose logs -f spark
+```
+
+---
+
+## Restart Individual Services
+
+Rebuild and restart the API after code changes:
+
+```bash
+docker compose up -d --build api
+```
+
+Restart Spark:
+
+```bash
+docker compose restart spark
+```
+
+---
+
+## Validate Docker Compose
+
+```bash
+docker compose config
+```
+
+---
+
+## Verify Spark Dependencies
+
+Confirm that the Kafka and PostgreSQL JARs are available:
+
+```bash
+docker compose exec spark bash -lc \
+'ls /opt/bitnami/spark/jars | egrep "kafka|postgresql"'
+```
+
+---
+
+## Troubleshooting
+
+If the API reports that an event was queued but no Kafka message appears, confirm:
+
+```text
+KAFKA_BOOTSTRAP=kafka:9092
+```
+
+Also confirm that the Kafka topic is:
+
+```text
+events
+```
+
+---
+
+## 📊 Power BI
+
+Connect Power BI to PostgreSQL using:
+
+```text
+Server:   localhost
+Port:     5433
+Database: eventsdb
+Username: app
+Password: app
+```
+
+Optional SQL query:
+
+```sql
+SELECT
+    source,
+    category,
+    value,
+    to_timestamp(ingested_at) AS ingested_at_ts,
+    processed_ts
+FROM public.events_stream;
+```
