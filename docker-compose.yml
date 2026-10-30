@@ -11,7 +11,7 @@ volumes:
 services:                   
   # --- ZooKeeper (required for Kafka 3.2.x) -
   zookeeper:                 # ← service key under "services"
-    image: bitnami/zookeeper:3.8
+    image: soldevelo/zookeeper:3.8
     networks: [dataplane]
     environment:
       ZOO_PORT_NUMBER: 2181
